@@ -85,8 +85,8 @@ bool HttpGetDayAheadPrices()
   }
   else
   {
-    std::cout.write(replybuffer.data(), static_cast<std::streamsize>(replybuffer.size()));
-    std::cout << std::endl;
+  //  std::cout.write(replybuffer.data(), static_cast<std::streamsize>(replybuffer.size()));
+  //  std::cout << std::endl;
 
     std::string json(replybuffer.data(), replybuffer.size());
     cJSON *json_root = cJSON_Parse(json.c_str());
@@ -103,7 +103,7 @@ bool HttpGetDayAheadPrices()
       }
       else
       {
-       
+
         PGconn *db_conn = PQconnectdb(conninfo.c_str());
         if (!db_conn)
         {
@@ -117,20 +117,27 @@ bool HttpGetDayAheadPrices()
           }
           else
           {
-            const char *upsertSql =
+            const char *upsertSql_dayAheadPrices =
                 "INSERT INTO day_ahead_prices (time_utc, price_area, price_dkk) "
                 "VALUES ($1::timestamptz, $2::text, $3::float8) "
                 "ON CONFLICT (time_utc, price_area) DO UPDATE SET "
                 "  price_dkk = EXCLUDED.price_dkk";
 
-            PGresult *prep = PQprepare(db_conn, "upsert_day_ahead", upsertSql, 3, nullptr);
-            if (!prep)
+            const char *upsertSql_exchangeRate =
+                "INSERT INTO exchange_rate (time_utc, base_currency, quote_currency, exchange_rate) "
+                "VALUES ($1::timestamptz, 'EUR', 'DKK', $2::numeric) "
+                "ON CONFLICT (base_currency, quote_currency, time_utc) DO UPDATE SET "
+                "  exchange_rate = EXCLUDED.exchange_rate";
+
+            PGresult *prep_dayAhead = PQprepare(db_conn, "upsert_day_ahead", upsertSql_dayAheadPrices, 3, nullptr);
+            PGresult *prep_exchangeRate = PQprepare(db_conn, "upsert_exchange_rate", upsertSql_exchangeRate, 3, nullptr);
+            if (!prep_dayAhead || !prep_exchangeRate)
             {
               std::cerr << "prep in nullptr" << std::endl;
             }
             else
             {
-              if (PQresultStatus(prep) != PGRES_COMMAND_OK)
+              if (PQresultStatus(prep_dayAhead) != PGRES_COMMAND_OK || PQresultStatus(prep_exchangeRate) != PGRES_COMMAND_OK)
               {
                 std::cerr << "psql Prepare failed: " << PQerrorMessage(db_conn) << std::endl;
               }
@@ -142,8 +149,9 @@ bool HttpGetDayAheadPrices()
                 }
                 else
                 {
-                  const int n = cJSON_GetArraySize(json_records);
-                  for (int i = 0; i < n; ++i)
+                  const int json_records_count = cJSON_GetArraySize(json_records);
+                  std::cout << "Got " << json_records_count << " records." << std::endl;
+                  for (int i = 0; i < json_records_count; ++i)
                   {
                     cJSON *json_record = cJSON_GetArrayItem(json_records, i);
                     if (!cJSON_IsObject(json_record))
@@ -154,28 +162,44 @@ bool HttpGetDayAheadPrices()
                     {
                       cJSON *timeUtc = cJSON_GetObjectItemCaseSensitive(json_record, "TimeUTC");
                       cJSON *area = cJSON_GetObjectItemCaseSensitive(json_record, "PriceArea");
-                      cJSON *dkk = cJSON_GetObjectItemCaseSensitive(json_record, "DayAheadPriceDKK");
-                      if (!cJSON_IsString(timeUtc) || !cJSON_IsString(area) || !cJSON_IsNumber(dkk))
+                      cJSON *priceDkk = cJSON_GetObjectItemCaseSensitive(json_record, "DayAheadPriceDKK");
+                      cJSON *PriceEur = cJSON_GetObjectItemCaseSensitive(json_record, "DayAheadPriceEUR");
+                      if (!cJSON_IsString(timeUtc) || !cJSON_IsString(area) || !cJSON_IsNumber(priceDkk))
                       {
                         std::cerr << "Json value missing" << std::endl;
                       }
                       else
                       {
-                        const char *params[3] = {timeUtc->valuestring, area->valuestring, std::to_string(dkk->valuedouble).c_str()};
-                        PGresult *pgResult = PQexecPrepared(db_conn, "upsert_day_ahead", 3, params, nullptr, nullptr, 0);
+
+                        std::string dkkStr = std::to_string(priceDkk->valuedouble);
+                        const char *params_dayAhead[3] = {timeUtc->valuestring, area->valuestring, dkkStr.c_str()};
+                        PGresult *pgResult = PQexecPrepared(db_conn, "upsert_day_ahead", std::size(params_dayAhead), params_dayAhead, nullptr, nullptr, 0);
                         if (!pgResult)
                         {
-                          std::cerr << "pgResult in nullptrd" << std::endl;
+                          std::cerr << "pgResult dayAhead is nullptrd" << std::endl;
                         }
                         else
                         {
                           if (PQresultStatus(pgResult) != PGRES_COMMAND_OK)
                           {
-                            std::cerr << "psql Upsert failed: " << PQerrorMessage(db_conn) << std::endl;
+                            std::cerr << "psql Upsert dayAhead failed: " << PQerrorMessage(db_conn) << std::endl;
                           }
-                          else
+
+                          PQclear(pgResult);
+                        }
+
+                        std::string exchangeRateStr = std::to_string(priceDkk->valuedouble / PriceEur->valuedouble);
+                        const char *params_exchangeRate[2] = {timeUtc->valuestring, exchangeRateStr.c_str()};
+                        pgResult = PQexecPrepared(db_conn, "upsert_exchange_rate", std::size(params_exchangeRate), params_exchangeRate, nullptr, nullptr, 0);
+                        if (!pgResult)
+                        {
+                          std::cerr << "pgResult exchangeRate is nullptr" << std::endl;
+                        }
+                        else
+                        {
+                          if (PQresultStatus(pgResult) != PGRES_COMMAND_OK)
                           {
-                            result = true;
+                            std::cerr << "psql Upsert exchangeRate failed: " << PQerrorMessage(db_conn) << std::endl;
                           }
 
                           PQclear(pgResult);
@@ -191,7 +215,8 @@ bool HttpGetDayAheadPrices()
                   }
                 }
               }
-              PQclear(prep);
+              PQclear(prep_dayAhead);
+              PQclear(prep_exchangeRate);
             }
           }
           PQfinish(db_conn);

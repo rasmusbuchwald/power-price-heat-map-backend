@@ -1,1 +1,0 @@
-https://api.energidataservice.dk/dataset/DayAheadPrices?offset=0&sort=TimeUTC%20DESC
