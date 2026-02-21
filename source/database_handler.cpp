@@ -10,7 +10,22 @@ cJSON *getJsonObject(cJSON *json_parrentObject, std::string name)
     cJSON *result = cJSON_GetObjectItem(json_parrentObject, name.c_str());
     if (!result)
     {
-        std::cerr << "\"" << name << "\" missing." << std::endl;
+        if (name == "DayAheadPriceEUR")
+        {
+            result = getJsonObject(json_parrentObject, "SpotPriceEUR");
+        }
+        else if (name == "DayAheadPriceDKK")
+        {
+            result = getJsonObject(json_parrentObject, "SpotPriceDKK");
+        }
+        else if (name == "TimeUTC")
+        {
+            result = getJsonObject(json_parrentObject, "HourUTC");
+        }
+        else
+        {
+            std::cerr << "\"" << name << "\" missing." << std::endl;
+        }
     }
     return result;
 }
@@ -152,8 +167,9 @@ void persistInDb(cJSON *json_root)
                 const char *upsertSql_dayAheadPrices =
                     "INSERT INTO day_ahead_prices (time_utc, price_area, price_dkk) "
                     "VALUES ($1::timestamptz, $2::text, $3::float8) "
-                    "ON CONFLICT (time_utc, price_area) DO UPDATE SET "
-                    "  price_dkk = EXCLUDED.price_dkk";
+                    "ON CONFLICT (time_utc, price_area) DO UPDATE "
+                    "SET price_dkk = EXCLUDED.price_dkk "
+                    "WHERE day_ahead_prices.price_dkk IS DISTINCT FROM EXCLUDED.price_dkk";
 
                 const char *upsertSql_exchangeRate =
                     "INSERT INTO exchange_rate (time_utc, base_currency, quote_currency, exchange_rate) "
@@ -177,7 +193,7 @@ void persistInDb(cJSON *json_root)
                     }
                     else
                     {
-                    //    processJsonRecords(json_records, db_conn, preparedStatementName_dayAhead, buildParams_dayAead, -1);
+                        processJsonRecords(json_records, db_conn, preparedStatementName_dayAhead, buildParams_dayAead, -1);
                         processJsonRecords(json_records, db_conn, preparedStatementName_exchangeRate, buildParams_exchangeRate, 1);
                     }
                 }
