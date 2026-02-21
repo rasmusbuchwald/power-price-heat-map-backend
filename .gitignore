@@ -1,0 +1,26 @@
+# Build files
+build/
+*.o
+*.out
+*.a
+*.so
+
+# CMake (if used)
+CMakeFiles/
+CMakeCache.txt
+
+# Make
+*.d
+
+# Logs
+*.log
+
+# Environment files
+.env
+
+# VSCode
+.vscode/
+
+# OS files
+.DS_Store
+
