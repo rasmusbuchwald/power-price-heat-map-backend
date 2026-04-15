@@ -17,8 +17,10 @@ std::vector<char> HttpGetDayAheadPrices()
 {
 
     std::vector<char> result;
-   // const std::string url = "https://api.energidataservice.dk/dataset/DayAheadPrices?offset=0&start=2020-02-21T00:00&sort=TimeUTC%20DESC";
-    const std::string url =  "https://api.energidataservice.dk/dataset/Elspotprices?offset=0&start=2020-01-01T00:00&end=2026-01-01T00:00&sort=HourUTC%20DESC";
+    //const std::string url = "https://api.energidataservice.dk/dataset/DayAheadPrices?offset=0&start=2020-02-21T00:00&sort=TimeUTC%20DESC"; // new api data from 2025-10-01
+    const std::string url = "https://api.energidataservice.dk/dataset/DayAheadPrices?offset=0&start=2026-04-01T00:00&end=2026-04-15T00:00&sort=TimeUTC%20DESC";
+  
+    //  const std::string url =  "https://api.energidataservice.dk/dataset/Elspotprices?offset=0&start=2020-01-01T00:00&end=2026-01-01T00:00&sort=HourUTC%20DESC";
 
     curl_global_init(CURL_GLOBAL_DEFAULT);
     CURL *curl = curl_easy_init();

@@ -5,6 +5,18 @@
 
 #include "database_handler.h"
 
+static bool requireEnv(const char *name, std::string &out)
+{
+    const char *value = std::getenv(name);
+    if (!value)
+    {
+        std::cerr << "ERROR: Missing required environment variable: " << name << std::endl;
+        return false;
+    }
+    out = value;
+    return true;
+}
+
 cJSON *getJsonObject(cJSON *json_parrentObject, std::string name)
 {
     cJSON *result = cJSON_GetObjectItem(json_parrentObject, name.c_str());
@@ -45,28 +57,6 @@ std::vector<std::string> buildParams_dayAead(cJSON *json_parrentObject)
     return result;
 }
 
-std::vector<std::string> buildParams_exchangeRate(cJSON *json_parrentObject)
-{
-    std::vector<std::string> result;
-    cJSON *timeUtc = getJsonObject(json_parrentObject, "TimeUTC");
-    cJSON *priceDkk = getJsonObject(json_parrentObject, "DayAheadPriceDKK");
-    cJSON *PriceEur = getJsonObject(json_parrentObject, "DayAheadPriceEUR");
-    if (cJSON_IsString(timeUtc) && cJSON_IsNumber(priceDkk) && cJSON_IsNumber(PriceEur))
-    {
-        double exchangeRate = priceDkk->valuedouble / PriceEur->valuedouble;
-        if (std::isfinite(exchangeRate)) // best che
-        {
-            std::string timeStr = timeUtc->valuestring;
-            if (timeStr.size() >= 10)
-            {
-                timeStr = timeStr.substr(0, 10) + "T00:00:00Z";
-            }
-            result.push_back(timeStr);
-            result.push_back(std::to_string(exchangeRate));
-        }
-    }
-    return result;
-}
 
 bool ExecOk(PGconn *conn, const char *sql)
 {
@@ -150,57 +140,53 @@ void persistInDb(cJSON *json_root)
     }
     else
     {
-        std::string conninfo = "host=" + std::string(std::getenv("DB_HOST")) + " port=" + std::string(std::getenv("DB_PORT")) + " dbname=" + std::string(std::getenv("DB_NAME")) + " user=" + std::string(std::getenv("DB_USER")) + " password=" + std::string(std::getenv("DB_PASSWORD"));
-        PGconn *db_conn = PQconnectdb(conninfo.c_str());
-        if (!db_conn)
+        std::string db_host, db_port, db_name, db_user, db_password;
+        if (requireEnv("DB_HOST", db_host) && requireEnv("DB_PORT", db_port) && requireEnv("DB_NAME", db_name) && requireEnv("DB_USER", db_user) && requireEnv("DB_PASSWORD", db_password))
         {
-            std::cerr << "db_conn in nullptr." << std::endl;
-        }
-        else
-        {
-            if (PQstatus(db_conn) != CONNECTION_OK)
+            std::string conninfo = "host=" + db_host + " port=" + db_port + " dbname=" + db_name + " user=" + db_user + " password=" + db_password;
+            PGconn *db_conn = PQconnectdb(conninfo.c_str());
+            if (!db_conn)
             {
-                std::cerr << "psql Connection failed: " << PQerrorMessage(db_conn) << std::endl;
+                std::cerr << "db_conn in nullptr." << std::endl;
             }
             else
             {
-                const char *upsertSql_dayAheadPrices =
-                    "INSERT INTO day_ahead_prices (time_utc, price_area, price_dkk) "
-                    "VALUES ($1::timestamptz, $2::text, $3::float8) "
-                    "ON CONFLICT (time_utc, price_area) DO UPDATE "
-                    "SET price_dkk = EXCLUDED.price_dkk "
-                    "WHERE day_ahead_prices.price_dkk IS DISTINCT FROM EXCLUDED.price_dkk";
-
-                const char *upsertSql_exchangeRate =
-                    "INSERT INTO exchange_rate (time_utc, base_currency, quote_currency, exchange_rate) "
-                    "VALUES ($1::timestamptz, 'EUR', 'DKK', $2::numeric) "
-                    "ON CONFLICT (base_currency, quote_currency, time_utc) DO UPDATE SET "
-                    "  exchange_rate = EXCLUDED.exchange_rate";
-
-                std::string preparedStatementName_dayAhead = "upsert_day_ahead";
-                std::string preparedStatementName_exchangeRate = "upsert_exchange_rate";
-                PGresult *prep_dayAhead = PQprepare(db_conn, preparedStatementName_dayAhead.c_str(), upsertSql_dayAheadPrices, 3, nullptr);
-                PGresult *prep_exchangeRate = PQprepare(db_conn, preparedStatementName_exchangeRate.c_str(), upsertSql_exchangeRate, 3, nullptr);
-                if (!prep_dayAhead || !prep_exchangeRate)
+                if (PQstatus(db_conn) != CONNECTION_OK)
                 {
-                    std::cerr << "prep is nullptr" << std::endl;
+                    std::cerr << "psql Connection failed: " << PQerrorMessage(db_conn) << std::endl;
                 }
                 else
                 {
-                    if (PQresultStatus(prep_dayAhead) != PGRES_COMMAND_OK || PQresultStatus(prep_exchangeRate) != PGRES_COMMAND_OK)
+                    const char *upsertSql_dayAheadPrices =
+                        "INSERT INTO day_ahead_prices (time_utc, price_area, price_dkk) "
+                        "VALUES ($1::timestamptz, $2::text, $3::float8) "
+                        "ON CONFLICT (time_utc, price_area) DO UPDATE "
+                        "SET price_dkk = EXCLUDED.price_dkk "
+                        "WHERE day_ahead_prices.price_dkk IS DISTINCT FROM EXCLUDED.price_dkk";
+
+                    std::string preparedStatementName_dayAhead = "upsert_day_ahead";
+
+                    PGresult *prep_dayAhead = PQprepare(db_conn, preparedStatementName_dayAhead.c_str(), upsertSql_dayAheadPrices, 3, nullptr);
+
+                    if (!prep_dayAhead)
                     {
-                        std::cerr << "psql Prepare failed: " << PQerrorMessage(db_conn) << std::endl;
+                        std::cerr << "prep is nullptr" << std::endl;
                     }
                     else
                     {
-                        processJsonRecords(json_records, db_conn, preparedStatementName_dayAhead, buildParams_dayAead, -1);
-                        processJsonRecords(json_records, db_conn, preparedStatementName_exchangeRate, buildParams_exchangeRate, 1);
+                        if (PQresultStatus(prep_dayAhead) != PGRES_COMMAND_OK)
+                        {
+                            std::cerr << "psql Prepare failed: " << PQerrorMessage(db_conn) << std::endl;
+                        }
+                        else
+                        {
+                            processJsonRecords(json_records, db_conn, preparedStatementName_dayAhead, buildParams_dayAead, -1);
+                        }
                     }
+                    PQclear(prep_dayAhead);
                 }
-                PQclear(prep_dayAhead);
-                PQclear(prep_exchangeRate);
             }
+            PQfinish(db_conn);
         }
-        PQfinish(db_conn);
     }
 }

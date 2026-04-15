@@ -15,8 +15,6 @@ CMakeCache.txt
 # Logs
 *.log
 
-# Environment files
-.env
 
 # VSCode
 .vscode/

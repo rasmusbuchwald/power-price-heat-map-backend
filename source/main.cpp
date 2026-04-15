@@ -6,7 +6,6 @@
 
 int main()
 {
-
   std::vector<char> replybuffer = HttpGetDayAheadPrices();
 
   if (replybuffer.empty())
@@ -29,7 +28,6 @@ int main()
       persistInDb(json_root);
       cJSON_Delete(json_root);
     }
-
   }
 }
 
