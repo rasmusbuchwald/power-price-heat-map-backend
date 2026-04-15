@@ -1,9 +1,10 @@
 #include <cstdlib>
 #include <iomanip>
-#include <cmath>
 #include <iostream>
+#include <functional>
+#include <unordered_map>
 
-#include "database_handler.h"
+#include "database_persister.h"
 
 static bool requireEnv(const char *name, std::string &out)
 {
@@ -17,37 +18,34 @@ static bool requireEnv(const char *name, std::string &out)
     return true;
 }
 
-cJSON *getJsonObject(cJSON *json_parrentObject, const std::string &name)
+static cJSON *getJsonObject(cJSON *json_parentObject, const std::string &name)
 {
-    cJSON *result = cJSON_GetObjectItem(json_parrentObject, name.c_str());
+    static const std::unordered_map<std::string, std::string> aliasMap = {
+        {"DayAheadPriceEUR", "SpotPriceEUR"},
+        {"DayAheadPriceDKK", "SpotPriceDKK"},
+        {"TimeUTC", "HourUTC"},
+    };
+
+    cJSON *result = cJSON_GetObjectItem(json_parentObject, name.c_str());
     if (!result)
     {
-        if (name == "DayAheadPriceEUR")
-        {
-            result = getJsonObject(json_parrentObject, "SpotPriceEUR");
-        }
-        else if (name == "DayAheadPriceDKK")
-        {
-            result = getJsonObject(json_parrentObject, "SpotPriceDKK");
-        }
-        else if (name == "TimeUTC")
-        {
-            result = getJsonObject(json_parrentObject, "HourUTC");
-        }
-        else
-        {
-            std::cerr << "\"" << name << "\" missing." << std::endl;
-        }
+        std::unordered_map<std::string, std::string>::const_iterator it = aliasMap.find(name);
+        if (it != aliasMap.end())
+            result = cJSON_GetObjectItem(json_parentObject, it->second.c_str());
     }
+    
+    if (!result)
+        std::cerr << "\"" << name << "\" missing." << std::endl;
+
     return result;
 }
 
-std::vector<std::string> buildParams_dayAhead(cJSON *json_parrentObject)
+static std::vector<std::string> buildParams_dayAhead(cJSON *json_parentObject)
 {
     std::vector<std::string> result;
-    cJSON *timeUtc = getJsonObject(json_parrentObject, "TimeUTC");
-    cJSON *area = getJsonObject(json_parrentObject, "PriceArea");
-    cJSON *priceDkk = getJsonObject(json_parrentObject, "DayAheadPriceDKK");
+    cJSON *timeUtc = getJsonObject(json_parentObject, "TimeUTC");
+    cJSON *area = getJsonObject(json_parentObject, "PriceArea");
+    cJSON *priceDkk = getJsonObject(json_parentObject, "DayAheadPriceDKK");
     if (cJSON_IsString(timeUtc) && cJSON_IsString(area) && cJSON_IsNumber(priceDkk))
     {
         result.push_back(timeUtc->valuestring);
@@ -57,8 +55,7 @@ std::vector<std::string> buildParams_dayAhead(cJSON *json_parrentObject)
     return result;
 }
 
-
-bool ExecOk(PGconn *conn, const char *sql)
+static bool ExecOk(PGconn *conn, const char *sql)
 {
     PGresult *res = PQexec(conn, sql);
     bool result = res && (PQresultStatus(res) == PGRES_COMMAND_OK);
@@ -69,13 +66,12 @@ bool ExecOk(PGconn *conn, const char *sql)
     return result;
 }
 
-void processJsonRecords(cJSON *json_records, PGconn *db_conn, const std::string &preparedStatementName, std::function<std::vector<std::string>(cJSON *)> buildParams, size_t cmp_index)
+void processJsonRecords(cJSON *json_records, PGconn *db_conn, const std::string &preparedStatementName, std::function<std::vector<std::string>(cJSON *)> buildParams)
 {
     const int json_records_count = cJSON_GetArraySize(json_records);
     std::cout << "Processing " << json_records_count << " records." << std::endl;
 
     int index_batch = 0;
-    std::vector<std::string> params_prev;
     while (index_batch < json_records_count)
     {
         std::cout << "Persisting \"" << preparedStatementName << "\" from index " << index_batch << std::flush;
@@ -100,14 +96,6 @@ void processJsonRecords(cJSON *json_records, PGconn *db_conn, const std::string 
             if (params.empty())
                 continue;
 
-            bool isDuplicate = cmp_index >= 0 &&
-                               cmp_index < params_prev.size() &&
-                               cmp_index < params.size() &&
-                               params[cmp_index] == params_prev[cmp_index];
-            if (isDuplicate)
-                continue;
-
-            params_prev = params;
             std::vector<const char *> paramPtrs;
             paramPtrs.reserve(params.size());
             for (const auto &s : params)
@@ -192,7 +180,7 @@ void persistInDb(cJSON *json_root)
         return;
     }
 
-    processJsonRecords(json_records, db_conn, preparedStatementName_dayAhead, buildParams_dayAhead, -1);
+    processJsonRecords(json_records, db_conn, preparedStatementName_dayAhead, buildParams_dayAhead);
 
     PQclear(prep_dayAhead);
     PQfinish(db_conn);
