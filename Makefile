@@ -7,7 +7,7 @@ BUILD_DIR := build
 OBJ_DIR   := $(BUILD_DIR)/obj
 SRC_DIR   := source
 
-CXXFLAGS += -std=c++17
+CXXFLAGS += -std=c++20
 CXXFLAGS += -Wall
 
 LDFLAGS += -pthread
@@ -15,7 +15,7 @@ LDFLAGS += -lcurl
 LDFLAGS += -lpq
 LDFLAGS += -lcjson
 
-OBJS = $(addprefix $(OBJ_DIR)/, main.o database_persister.o api_handler.o)
+OBJS = $(addprefix $(OBJ_DIR)/, main.o database_handler.o api_handler.o)
 
 .PHONY: all
 all:  $(BUILD_DIR)/$(PROG)
