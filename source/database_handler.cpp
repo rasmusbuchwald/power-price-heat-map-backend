@@ -17,7 +17,7 @@ static bool requireEnv(const char *name, std::string &out)
     return true;
 }
 
-cJSON *getJsonObject(cJSON *json_parrentObject, std::string name)
+cJSON *getJsonObject(cJSON *json_parrentObject, const std::string &name)
 {
     cJSON *result = cJSON_GetObjectItem(json_parrentObject, name.c_str());
     if (!result)
@@ -42,7 +42,7 @@ cJSON *getJsonObject(cJSON *json_parrentObject, std::string name)
     return result;
 }
 
-std::vector<std::string> buildParams_dayAead(cJSON *json_parrentObject)
+std::vector<std::string> buildParams_dayAhead(cJSON *json_parrentObject)
 {
     std::vector<std::string> result;
     cJSON *timeUtc = getJsonObject(json_parrentObject, "TimeUTC");
@@ -78,115 +78,122 @@ void processJsonRecords(cJSON *json_records, PGconn *db_conn, const std::string 
     std::vector<std::string> params_prev;
     while (index_batch < json_records_count)
     {
-        std::cout << "Persisteting preparedStatem \"" << std::string(preparedStatementName) << "\" form index " << index_batch << std::flush;
-        if (ExecOk(db_conn, "BEGIN"))
-        {
-            int index_record = index_batch;
-            for (; index_record < json_records_count && index_record < (index_batch + 2500); ++index_record)
-            {
-                cJSON *json_record = cJSON_GetArrayItem(json_records, index_record);
-                if (!cJSON_IsObject(json_record))
-                {
-                    std::cerr << "Index " << index_record << " is not an json object" << std::endl;
-                }
-                else
-                {
-                    std::vector<std::string> params = buildParams(json_record);
-                    if (!params.empty() && (cmp_index < 0 || (cmp_index > params_prev.size()) || (cmp_index > params.size()) || (params[cmp_index] != params_prev[cmp_index])))
-                    {
-                        params_prev = params;
-                        std::vector<const char *> paramPtrs;
-                        paramPtrs.reserve(params.size());
-                        for (const auto &s : params)
-                            paramPtrs.emplace_back(s.c_str());
+        std::cout << "Persisting \"" << preparedStatementName << "\" from index " << index_batch << std::flush;
 
-                        PGresult *pgResult = PQexecPrepared(db_conn, preparedStatementName.c_str(), static_cast<int>(paramPtrs.size()), paramPtrs.data(), nullptr, nullptr, 0);
-                        if (!pgResult)
-                        {
-                            std::cerr << "pgResult for \"" << preparedStatementName << " is nullptr" << std::endl;
-                        }
-                        else
-                        {
-                            if (PQresultStatus(pgResult) != PGRES_COMMAND_OK)
-                            {
-                                std::cerr << "psql Upsert  for \"" << preparedStatementName << " failed: " << PQerrorMessage(db_conn) << std::endl;
-                            }
-                            PQclear(pgResult);
-                        }
-                    }
-                }
-            }
-            if (!ExecOk(db_conn, "COMMIT"))
+        if (!ExecOk(db_conn, "BEGIN"))
+        {
+            std::cerr << "BEGIN failed, skipping batch at index " << index_batch << std::endl;
+            break;
+        }
+
+        int index_record = index_batch;
+        for (; index_record < json_records_count && index_record < (index_batch + 2500); ++index_record)
+        {
+            cJSON *json_record = cJSON_GetArrayItem(json_records, index_record);
+            if (!cJSON_IsObject(json_record))
             {
-                ExecOk(db_conn, "ROLLBACK");
+                std::cerr << "Index " << index_record << " is not a json object" << std::endl;
+                continue;
+            }
+
+            std::vector<std::string> params = buildParams(json_record);
+            if (params.empty())
+                continue;
+
+            bool isDuplicate = cmp_index >= 0 &&
+                               cmp_index < params_prev.size() &&
+                               cmp_index < params.size() &&
+                               params[cmp_index] == params_prev[cmp_index];
+            if (isDuplicate)
+                continue;
+
+            params_prev = params;
+            std::vector<const char *> paramPtrs;
+            paramPtrs.reserve(params.size());
+            for (const auto &s : params)
+                paramPtrs.emplace_back(s.c_str());
+
+            PGresult *pgResult = PQexecPrepared(db_conn, preparedStatementName.c_str(), static_cast<int>(paramPtrs.size()), paramPtrs.data(), nullptr, nullptr, 0);
+            if (!pgResult)
+            {
+                std::cerr << "pgResult for \"" << preparedStatementName << "\" is nullptr" << std::endl;
             }
             else
             {
-                double percent = (static_cast<double>(index_record) / json_records_count) * 100.0;
-                std::cout << " - " << index_record - index_batch << " records Persisteted. (" << std::fixed << std::setprecision(1) << percent << "%)" << std::endl;
+                if (PQresultStatus(pgResult) != PGRES_COMMAND_OK)
+                    std::cerr << "Upsert for \"" << preparedStatementName << "\" failed: " << PQerrorMessage(db_conn) << std::endl;
+                PQclear(pgResult);
             }
-            index_batch = index_record;
         }
+
+        if (!ExecOk(db_conn, "COMMIT"))
+        {
+            ExecOk(db_conn, "ROLLBACK");
+        }
+        else
+        {
+            double percent = (static_cast<double>(index_record) / json_records_count) * 100.0;
+            std::cout << " - " << index_record - index_batch << " records persisted. (" << std::fixed << std::setprecision(1) << percent << "%)" << std::endl;
+        }
+        index_batch = index_record;
     }
 }
 
 void persistInDb(cJSON *json_root)
 {
-
     cJSON *json_records = getJsonObject(json_root, "records");
     if (!cJSON_IsArray(json_records))
     {
         std::cerr << "[cJSON] 'records' missing or not an array" << std::endl;
+        return;
     }
-    else
+
+    std::string db_host, db_port, db_name, db_user, db_password;
+    if (!requireEnv("DB_HOST", db_host) || !requireEnv("DB_PORT", db_port) || !requireEnv("DB_NAME", db_name) || !requireEnv("DB_USER", db_user) || !requireEnv("DB_PASSWORD", db_password))
+        return;
+
+    std::string conninfo = "host=" + db_host + " port=" + db_port + " dbname=" + db_name + " user=" + db_user + " password=" + db_password;
+    PGconn *db_conn = PQconnectdb(conninfo.c_str());
+    if (!db_conn)
     {
-        std::string db_host, db_port, db_name, db_user, db_password;
-        if (requireEnv("DB_HOST", db_host) && requireEnv("DB_PORT", db_port) && requireEnv("DB_NAME", db_name) && requireEnv("DB_USER", db_user) && requireEnv("DB_PASSWORD", db_password))
-        {
-            std::string conninfo = "host=" + db_host + " port=" + db_port + " dbname=" + db_name + " user=" + db_user + " password=" + db_password;
-            PGconn *db_conn = PQconnectdb(conninfo.c_str());
-            if (!db_conn)
-            {
-                std::cerr << "db_conn in nullptr." << std::endl;
-            }
-            else
-            {
-                if (PQstatus(db_conn) != CONNECTION_OK)
-                {
-                    std::cerr << "psql Connection failed: " << PQerrorMessage(db_conn) << std::endl;
-                }
-                else
-                {
-                    const char *upsertSql_dayAheadPrices =
-                        "INSERT INTO day_ahead_prices (time_utc, price_area, price_dkk) "
-                        "VALUES ($1::timestamptz, $2::text, $3::float8) "
-                        "ON CONFLICT (time_utc, price_area) DO UPDATE "
-                        "SET price_dkk = EXCLUDED.price_dkk "
-                        "WHERE day_ahead_prices.price_dkk IS DISTINCT FROM EXCLUDED.price_dkk";
-
-                    std::string preparedStatementName_dayAhead = "upsert_day_ahead";
-
-                    PGresult *prep_dayAhead = PQprepare(db_conn, preparedStatementName_dayAhead.c_str(), upsertSql_dayAheadPrices, 3, nullptr);
-
-                    if (!prep_dayAhead)
-                    {
-                        std::cerr << "prep is nullptr" << std::endl;
-                    }
-                    else
-                    {
-                        if (PQresultStatus(prep_dayAhead) != PGRES_COMMAND_OK)
-                        {
-                            std::cerr << "psql Prepare failed: " << PQerrorMessage(db_conn) << std::endl;
-                        }
-                        else
-                        {
-                            processJsonRecords(json_records, db_conn, preparedStatementName_dayAhead, buildParams_dayAead, -1);
-                        }
-                    }
-                    PQclear(prep_dayAhead);
-                }
-            }
-            PQfinish(db_conn);
-        }
+        std::cerr << "db_conn is nullptr." << std::endl;
+        return;
     }
+
+    if (PQstatus(db_conn) != CONNECTION_OK)
+    {
+        std::cerr << "psql Connection failed: " << PQerrorMessage(db_conn) << std::endl;
+        PQfinish(db_conn);
+        return;
+    }
+
+    const char *upsertSql_dayAheadPrices =
+        "INSERT INTO day_ahead_prices (time_utc, price_area, price_dkk) "
+        "VALUES ($1::timestamptz, $2::text, $3::float8) "
+        "ON CONFLICT (time_utc, price_area) DO UPDATE "
+        "SET price_dkk = EXCLUDED.price_dkk "
+        "WHERE day_ahead_prices.price_dkk IS DISTINCT FROM EXCLUDED.price_dkk";
+
+    std::string preparedStatementName_dayAhead = "upsert_day_ahead";
+    PGresult *prep_dayAhead = PQprepare(db_conn, preparedStatementName_dayAhead.c_str(), upsertSql_dayAheadPrices, 3, nullptr);
+
+    if (!prep_dayAhead)
+    {
+        std::cerr << "prep is nullptr" << std::endl;
+        PQfinish(db_conn);
+        return;
+    }
+
+    if (PQresultStatus(prep_dayAhead) != PGRES_COMMAND_OK)
+    {
+        std::cerr << "psql Prepare failed: " << PQerrorMessage(db_conn) << std::endl;
+        PQclear(prep_dayAhead);
+        PQfinish(db_conn);
+        return;
+    }
+
+    processJsonRecords(json_records, db_conn, preparedStatementName_dayAhead, buildParams_dayAhead, -1);
+
+    PQclear(prep_dayAhead);
+    PQfinish(db_conn);
 }
