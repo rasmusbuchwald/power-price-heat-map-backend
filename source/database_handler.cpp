@@ -9,8 +9,6 @@
 
 #include "database_handler.h"
 
-
-
 static bool requireEnv(const char *name, std::string &out)
 {
     const char *value = std::getenv(name);
@@ -38,7 +36,7 @@ static cJSON *getJsonObject(cJSON *json_parentObject, const std::string &name)
         if (it != aliasMap.end())
             result = cJSON_GetObjectItem(json_parentObject, it->second.c_str());
     }
-    
+
     if (!result)
         std::cerr << "\"" << name << "\" missing." << std::endl;
 
@@ -70,8 +68,6 @@ static bool ExecOk(PGconn *conn, const char *sql)
         PQclear(res);
     return result;
 }
-
-
 
 static void processJsonRecords(cJSON *json_records, PGconn *db_conn, const std::string &preparedStatementName, std::function<std::vector<std::string>(cJSON *)> buildParams)
 {
@@ -158,26 +154,18 @@ PGconn *connectToDb()
     return db_conn;
 }
 
-
-std::optional<std::chrono::sys_seconds> getLatestTimestamp(PGconn *db_conn)
+std::string getLatestTimestamp(PGconn *db_conn)
 {
     const char *sql = "SELECT MAX(time_utc) FROM day_ahead_prices";
     PGresult *res = PQexec(db_conn, sql);
-    std::optional<std::chrono::sys_seconds> result;
+    std::string result;
     if (!res || PQresultStatus(res) != PGRES_TUPLES_OK)
     {
         std::cerr << "getLatestTimestamp failed: " << PQerrorMessage(db_conn) << std::endl;
     }
     else if (PQntuples(res) > 0 && !PQgetisnull(res, 0, 0))
     {
-        std::string value = PQgetvalue(res, 0, 0);
-        std::istringstream ss(value);
-        std::tm t = {};
-        ss >> std::get_time(&t, "%Y-%m-%d %H:%M:%S");
-        if (!ss.fail())
-            result = std::chrono::sys_seconds(std::chrono::seconds(timegm(&t)));
-        else
-            std::cerr << "getLatestTimestamp: failed to parse \"" << value << "\"" << std::endl;
+        result = PQgetvalue(res, 0, 0);
     }
     if (res)
         PQclear(res);

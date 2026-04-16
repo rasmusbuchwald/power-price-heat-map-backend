@@ -14,11 +14,10 @@ int main()
   if (!db_conn)
     return 1;
 
-  std::optional<std::chrono::sys_seconds> latest = getLatestTimestamp(db_conn);
-  if (latest)
+  std::string latestTimestamp = getLatestTimestamp(db_conn);
+  if (latestTimestamp.size() > 0)
   {
-    std::time_t t = std::chrono::system_clock::to_time_t(*latest);
-    std::cout << "Latest timestamp in DB: " << std::put_time(std::gmtime(&t), "%Y-%m-%d %H:%M:%S UTC") << std::endl;
+    std::cout << "Latest timestamp in DB: " << latestTimestamp << std::endl;
   }
   else
     std::cout << "No data in DB yet." << std::endl;
@@ -46,5 +45,3 @@ int main()
 
   PQfinish(db_conn);
 }
-
-
