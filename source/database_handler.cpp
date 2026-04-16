@@ -51,9 +51,13 @@ static std::vector<std::string> buildParams_dayAhead(cJSON *json_parentObject)
     cJSON *priceDkk = getJsonObject(json_parentObject, "DayAheadPriceDKK");
     if (cJSON_IsString(timeUtc) && cJSON_IsString(area) && cJSON_IsNumber(priceDkk))
     {
-        result.push_back(timeUtc->valuestring);
+        result.push_back(std::string(timeUtc->valuestring) + "+00");
         result.push_back(area->valuestring);
         result.push_back(std::to_string(priceDkk->valuedouble));
+    }
+    else
+    {
+        std::cerr << "invalid parms \"" << timeUtc->valuestring << "\" - \"" << area->valuestring << "\" - \"" << priceDkk->valuestring << "\"" << std::endl;
     }
     return result;
 }
@@ -74,48 +78,52 @@ static void processJsonRecords(cJSON *json_records, PGconn *db_conn, const std::
     const int json_records_count = cJSON_GetArraySize(json_records);
     std::cout << "Processing " << json_records_count << " records." << std::endl;
 
-    int index_batch = 0;
-    while (index_batch < json_records_count)
+    int index_record = 0;
+    cJSON *current_record = json_records->child;
+    while (current_record)
     {
-        std::cout << "Persisting \"" << preparedStatementName << "\" from index " << index_batch << std::flush;
-
         if (!ExecOk(db_conn, "BEGIN"))
         {
-            std::cerr << "BEGIN failed, skipping batch at index " << index_batch << std::endl;
+            std::cerr << "BEGIN failed, skipping batch at index " << index_record << std::endl;
             break;
         }
-
-        int index_record = index_batch;
-        for (; index_record < json_records_count && index_record < (index_batch + 2500); ++index_record)
+        do
         {
-            cJSON *json_record = cJSON_GetArrayItem(json_records, index_record);
-            if (!cJSON_IsObject(json_record))
+            if (cJSON_IsObject(current_record))
             {
-                std::cerr << "Index " << index_record << " is not a json object" << std::endl;
-                continue;
-            }
+                std::vector<std::string> params = buildParams(current_record);
+                if (!params.empty())
+                {
+                    std::vector<const char *> paramPtrs;
+                    paramPtrs.reserve(params.size());
+                    for (const auto &s : params)
+                        paramPtrs.emplace_back(s.c_str());
 
-            std::vector<std::string> params = buildParams(json_record);
-            if (params.empty())
-                continue;
-
-            std::vector<const char *> paramPtrs;
-            paramPtrs.reserve(params.size());
-            for (const auto &s : params)
-                paramPtrs.emplace_back(s.c_str());
-
-            PGresult *pgResult = PQexecPrepared(db_conn, preparedStatementName.c_str(), static_cast<int>(paramPtrs.size()), paramPtrs.data(), nullptr, nullptr, 0);
-            if (!pgResult)
-            {
-                std::cerr << "pgResult for \"" << preparedStatementName << "\" is nullptr" << std::endl;
+                    PGresult *pgResult = PQexecPrepared(db_conn, preparedStatementName.c_str(), static_cast<int>(paramPtrs.size()), paramPtrs.data(), nullptr, nullptr, 0);
+                    if (!pgResult)
+                    {
+                        std::cerr << "pgResult for \"" << preparedStatementName << "\" is nullptr" << std::endl;
+                    }
+                    else
+                    {
+                        if (PQresultStatus(pgResult) != PGRES_COMMAND_OK)
+                            std::cerr << "Upsert for \"" << preparedStatementName << "\" failed: " << PQerrorMessage(db_conn) << std::endl;
+                        PQclear(pgResult);
+                    }
+                }
+                else
+                {
+                    std::cerr << "Index " << index_record << " params empty" << std::endl;
+                }
             }
             else
             {
-                if (PQresultStatus(pgResult) != PGRES_COMMAND_OK)
-                    std::cerr << "Upsert for \"" << preparedStatementName << "\" failed: " << PQerrorMessage(db_conn) << std::endl;
-                PQclear(pgResult);
+                std::cerr << "Index " << index_record << " is not a json object" << std::endl;
             }
-        }
+
+            current_record = current_record->next;
+            index_record++;
+        } while (current_record && index_record % 2500 != 0);
 
         if (!ExecOk(db_conn, "COMMIT"))
         {
@@ -124,9 +132,8 @@ static void processJsonRecords(cJSON *json_records, PGconn *db_conn, const std::
         else
         {
             double percent = (static_cast<double>(index_record) / json_records_count) * 100.0;
-            std::cout << " - " << index_record - index_batch << " records persisted. (" << std::fixed << std::setprecision(1) << percent << "%)" << std::endl;
+            std::cout << index_record << " records persisted. (" << std::fixed << std::setprecision(1) << percent << "%)" << std::endl;
         }
-        index_batch = index_record;
     }
 }
 
@@ -154,18 +161,24 @@ PGconn *connectToDb()
     return db_conn;
 }
 
-std::string getLatestTimestamp(PGconn *db_conn)
+std::tm getLatestCphTimestamp(PGconn *db_conn)
 {
-    const char *sql = "SELECT MAX(time_utc) FROM day_ahead_prices";
+    const char *sql = "SELECT MAX(time_utc) AT TIME ZONE 'Europe/Copenhagen' FROM day_ahead_prices";
     PGresult *res = PQexec(db_conn, sql);
-    std::string result;
+    std::tm result = {};
     if (!res || PQresultStatus(res) != PGRES_TUPLES_OK)
     {
         std::cerr << "getLatestTimestamp failed: " << PQerrorMessage(db_conn) << std::endl;
     }
     else if (PQntuples(res) > 0 && !PQgetisnull(res, 0, 0))
     {
-        result = PQgetvalue(res, 0, 0);
+        std::istringstream ss(PQgetvalue(res, 0, 0));
+
+        ss >> std::get_time(&result, "%Y-%m-%d %H:%M:%S");
+        if (ss.fail())
+        {
+            std::cerr << "getLatestTimestamp: failed to parse timestamp \"" << PQgetvalue(res, 0, 0) << "\"" << std::endl;
+        }
     }
     if (res)
         PQclear(res);

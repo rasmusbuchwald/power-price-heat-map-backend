@@ -1,12 +1,9 @@
 #ifndef DEFINE__API_HANDLER
 #define DEFINE__API_HANDLER
 
+#include <vector>
+#include <ctime>
 
-#include <cjson/cJSON.h>
-
-
-std::vector<char>  HttpGetDayAheadPrices();
-size_t CurlWriteCallback(char *ptr, size_t size, size_t nmemb, void *userdata);
-
+std::vector<char> httpGetDayAheadPrices(std::tm timestampStart);
 
 #endif // DEFINE__API_HANDLER

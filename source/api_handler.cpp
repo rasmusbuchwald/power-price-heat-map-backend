@@ -1,11 +1,13 @@
 #include <vector>
 #include <string>
+#include <ctime>
 #include <curl/curl.h>
 #include <iostream>
 
+#include "helper_functions.h"
 #include "api_handler.h"
 
-size_t CurlWriteCallback(char *ptr, size_t size, size_t nmemb, void *userdata)
+static size_t CurlWriteCallback(char *ptr, size_t size, size_t nmemb, void *userdata)
 {
     const size_t bytes = size * nmemb;
     std::vector<char> *buffer = static_cast<std::vector<char> *>(userdata);
@@ -13,14 +15,15 @@ size_t CurlWriteCallback(char *ptr, size_t size, size_t nmemb, void *userdata)
     return bytes;
 }
 
-std::vector<char> HttpGetDayAheadPrices()
+std::vector<char> httpGetDayAheadPrices(std::tm timestampStart)
 {
-
     std::vector<char> result;
-    //const std::string url = "https://api.energidataservice.dk/dataset/DayAheadPrices?offset=0&start=2020-02-21T00:00&sort=TimeUTC%20DESC"; // new api data from 2025-10-01
-    const std::string url = "https://api.energidataservice.dk/dataset/DayAheadPrices?offset=0&start=2026-04-01T00:00&end=2026-04-15T00:00&sort=TimeUTC%20DESC";
-  
-    //  const std::string url =  "https://api.energidataservice.dk/dataset/Elspotprices?offset=0&start=2020-01-01T00:00&end=2026-01-01T00:00&sort=HourUTC%20DESC";
+    std::string start = zeroPadInt(timestampStart.tm_year + 1900) + "-" + zeroPadInt(timestampStart.tm_mon + 1) + "-" + zeroPadInt(timestampStart.tm_mday) + "T" + zeroPadInt(timestampStart.tm_hour) + ":" + zeroPadInt(timestampStart.tm_min);
+    const std::string url = timestampStart.tm_year < 125 || (timestampStart.tm_year == 125 && (timestampStart.tm_mon < 8 || (timestampStart.tm_mon == 8 && (timestampStart.tm_mday < 30 || (timestampStart.tm_mday == 30 && timestampStart.tm_hour < 23)))))
+                                ? "https://api.energidataservice.dk/dataset/Elspotprices?offset=0&start=" + start + "&sort=HourUTC%20DESC"
+                                : "https://api.energidataservice.dk/dataset/DayAheadPrices?offset=0&start=" + start + "&sort=TimeUTC%20DESC";
+
+    // https://api.energidataservice.dk/dataset/Elspotprices?offset=0&start=2025-09-30T21:00&sort=HourUTC%20DESC
 
     curl_global_init(CURL_GLOBAL_DEFAULT);
     CURL *curl = curl_easy_init();

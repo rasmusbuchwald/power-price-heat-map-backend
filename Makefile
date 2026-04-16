@@ -15,7 +15,7 @@ LDFLAGS += -lcurl
 LDFLAGS += -lpq
 LDFLAGS += -lcjson
 
-OBJS = $(addprefix $(OBJ_DIR)/, main.o database_handler.o api_handler.o)
+OBJS = $(addprefix $(OBJ_DIR)/, main.o helper_functions.o database_handler.o api_handler.o)
 
 .PHONY: all
 all:  $(BUILD_DIR)/$(PROG)

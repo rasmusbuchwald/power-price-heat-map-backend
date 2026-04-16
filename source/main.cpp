@@ -5,6 +5,7 @@
 #include <iomanip>
 #include <ctime>
 
+#include "helper_functions.h"
 #include "api_handler.h"
 #include "database_handler.h"
 
@@ -14,15 +15,17 @@ int main()
   if (!db_conn)
     return 1;
 
-  std::string latestTimestamp = getLatestTimestamp(db_conn);
-  if (latestTimestamp.size() > 0)
-  {
-    std::cout << "Latest timestamp in DB: " << latestTimestamp << std::endl;
-  }
-  else
-    std::cout << "No data in DB yet." << std::endl;
+  std::tm startTime = getLatestCphTimestamp(db_conn);
 
-  std::vector<char> replybuffer = HttpGetDayAheadPrices();
+  if (startTime.tm_year == 0)
+  {
+    startTime = {.tm_sec = 0, .tm_min = 0, .tm_hour = 22, .tm_mday = 30, .tm_mon = 5, .tm_year = 99};
+  }
+  std::cout << "starttime : " + zeroPadInt(startTime.tm_year + 1900) << "-" << zeroPadInt(startTime.tm_mon + 1) << "-" << zeroPadInt(startTime.tm_mday) << " " << zeroPadInt(startTime.tm_hour) << ":" << zeroPadInt(startTime.tm_min) << std::endl;
+  std::vector<char> replybuffer = httpGetDayAheadPrices(startTime);
+
+  // std::cout.write(replybuffer.data(), static_cast<std::streamsize>(replybuffer.size()));
+  //  std::cout << std::endl;
 
   if (replybuffer.empty())
   {

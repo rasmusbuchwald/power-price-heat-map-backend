@@ -10,6 +10,6 @@
 
 PGconn *connectToDb();
 void persistInDb(PGconn *db_conn, cJSON *json_root);
-std::string getLatestTimestamp(PGconn *db_conn);
+std::tm getLatestCphTimestamp(PGconn *db_conn);
 
 #endif // DEFINE__DB_HANDLER
