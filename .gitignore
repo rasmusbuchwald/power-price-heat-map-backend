@@ -16,9 +16,6 @@ CMakeCache.txt
 *.log
 
 
-# VSCode
-.vscode/
-
 # OS files
 .DS_Store
 

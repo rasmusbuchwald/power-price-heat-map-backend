@@ -1,0 +1,13 @@
+#!/bin/sh
+set -e
+
+if [ "$1" = "configure" ]; then
+    # Reload systemd configuration so that the new service file is recognized.
+    systemctl daemon-reload || true
+    # Enable the service to start on boot. Adjust the command if you prefer not to enable it.
+    systemctl enable mqtt-plc-handler.service || true
+    # Optionally, start the service.
+    systemctl start mqtt-plc-handler.service || true
+fi
+
+exit 0

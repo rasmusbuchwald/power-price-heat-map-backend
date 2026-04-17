@@ -1,0 +1,9 @@
+#!/bin/sh
+set -e
+
+if [ "$1" = "remove" ] || [ "$1" = "upgrade" ]; then
+    systemctl stop power-price-syncronizer.service || true
+    systemctl disable power-price-syncronizer.service || true
+fi
+
+exit 0

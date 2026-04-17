@@ -1,0 +1,8 @@
+Section: base
+Priority: optional
+Package: @PACKAGE@
+Version: @VERSION@
+Architecture: @ARCHITECTURE@
+Depends: libpq5, libcurl4, libcjson1
+Maintainer: Rasmus Buchwald <rasmusbuchwald@gmail.com>
+Description: Power price heat map backend service.

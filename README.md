@@ -1,5 +1,5 @@
-# power-price-heat-map Backend
-A web service that pulls power priceses and populates them as a heat map
+# power-price-syncronizer
+A web service that pulls power priceses fro apis and stores them in to a local db
 
 ## Dependencies
 ```bash

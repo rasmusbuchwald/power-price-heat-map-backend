@@ -22,8 +22,7 @@ std::vector<char> httpGetDayAheadPrices(std::tm timestampStart)
     const std::string url = timestampStart.tm_year < 125 || (timestampStart.tm_year == 125 && (timestampStart.tm_mon < 8 || (timestampStart.tm_mon == 8 && (timestampStart.tm_mday < 30 || (timestampStart.tm_mday == 30 && timestampStart.tm_hour < 23)))))
                                 ? "https://api.energidataservice.dk/dataset/Elspotprices?offset=0&start=" + start + "&sort=HourUTC%20DESC"
                                 : "https://api.energidataservice.dk/dataset/DayAheadPrices?offset=0&start=" + start + "&sort=TimeUTC%20DESC";
-
-    // https://api.energidataservice.dk/dataset/Elspotprices?offset=0&start=2025-09-30T21:00&sort=HourUTC%20DESC
+ 
 
     curl_global_init(CURL_GLOBAL_DEFAULT);
     CURL *curl = curl_easy_init();

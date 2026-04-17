@@ -1,0 +1,14 @@
+[Unit]
+Description=Power Price Synchronizer
+After=network-online.target postgresql.service
+Wants=network-online.target
+
+[Service]
+ExecStart=/usr/bin/power-price-syncronizer
+Type=oneshot
+EnvironmentFile=/etc/power-price-syncronizer/power-price-syncronizer.env
+# attempt to restart (on-failure) after X seconds
+RestartSec=15
+
+[Install]
+WantedBy=multi-user.target
